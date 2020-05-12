@@ -28,7 +28,7 @@ var colors [][]uint8 = [][]uint8{
 	{0, 0, 255},
 }
 
-var width, height int = 2048, 2048    //width and height of the image in pixels
+var width, height int = 256, 256      //width and height of the image in pixels
 var xRange, yRange float64 = 2.0, 2.0 //the range +/- plotted on the cartesian plane
 var exponent float64 = 3.40           //exponent of the mandelbrot function
 var iterations int = 10000            //the number of iterations to compute before bailing out
