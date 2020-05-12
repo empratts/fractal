@@ -17,3 +17,7 @@
 #Output files of the program
 *.csv
 *.png
+
+#VScode files
+*.code-workspace
+.vscode

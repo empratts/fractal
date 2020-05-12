@@ -28,7 +28,7 @@ var colors [][]uint8 = [][]uint8{
 	{0, 0, 255},
 }
 
-var width, height int = 256, 256      //width and height of the image in pixels
+var width, height int = 2048, 2048    //width and height of the image in pixels
 var xRange, yRange float64 = 2.0, 2.0 //the range +/- plotted on the cartesian plane
 var exponent float64 = 3.40           //exponent of the mandelbrot function
 var iterations int = 10000            //the number of iterations to compute before bailing out
@@ -47,7 +47,7 @@ type imagePoint struct {
 
 type csvPoint struct {
 	loc   point
-	score int
+	score float64
 }
 
 func main() {
@@ -86,7 +86,7 @@ func main() {
 }
 
 //mb should return the number of cycles that the mandelbrot function remains inside the bailout circle for the given input
-func mb(p point) int {
+func mb(p point) float64 {
 	//the function takes the form (X^exp + (a + bi))
 
 	//first calculate the starting point for the pixel in the plane between +/- xbound, ybound
@@ -95,19 +95,59 @@ func mb(p point) int {
 
 	xa := 0.0
 	xb := 0.0
+	var xaPrev, xbPrev, x1, x2, y1, y2 float64
 
 	for i := 0; i < iterations; i++ {
 		//repeated application of MB
+		xaPrev, xbPrev = xa, xb
 		xa, xb = complexPower(xa, xb, exponent)
 		xa += a
 		xb += b
 		//check if the result stays inside the bailout circle
 		bailDistance := math.Sqrt(xa*xa + xb*xb)
 		if bailDistance > bailRadius {
-			return i
+
+			if xa == math.Min(xa, xaPrev) {
+				x1, y1 = xa, xb
+				x2, y2 = xaPrev, xbPrev
+			} else {
+				x2, y2 = xa, xb
+				x1, y1 = xaPrev, xbPrev
+			}
+
+			//fmt.Println(xaPrev, xbPrev)
+			//fmt.Println(xa, xb)
+
+			m := (y2 - y1) / (x2 - x1)
+			b := y1 - (m * x1)
+			//fmt.Println(m)
+			//fmt.Println(b)
+
+			aQuad := m*m + 1
+			bQuad := 2 * m * b
+			cQuad := b*b - bailRadius*bailRadius
+
+			xQuad := (-1.0*bQuad + math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
+
+			if xQuad > x2 || xQuad < x1 {
+				xQuad = (-1.0*bQuad - math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
+			}
+
+			yQuad := m*xQuad + b
+			// fmt.Println(xQuad, yQuad)
+
+			interceptDistance := math.Sqrt((xaPrev-xQuad)*(xaPrev-xQuad) + (xbPrev-yQuad)*(xbPrev-yQuad))
+			exitDistance := math.Sqrt((xaPrev-xa)*(xaPrev-xa) + (xbPrev-xb)*(xbPrev-xb))
+			// fmt.Println(interceptDistance)
+			// fmt.Println(exitDistance)
+
+			exitSpeed := interceptDistance / exitDistance
+			// fmt.Println(exitSpeed)
+
+			return float64(i) + exitSpeed
 		}
 	}
-	return iterations
+	return float64(iterations)
 }
 
 func mbConc(pChan <-chan point, imgChan chan<- imagePoint, csvChan chan<- csvPoint) {
@@ -141,7 +181,7 @@ func writeImage(imgChan <-chan imagePoint, wg *sync.WaitGroup) {
 		img.Set(ip.loc.x, ip.loc.y, ip.pointColor)
 	}
 
-	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v.png", exponent, bailRadius, iterations, width, height)
+	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v-ES.png", exponent, bailRadius, iterations, width, height)
 	f, err := os.Create(filename)
 	if err != nil {
 		fmt.Println("error creating PNG file")
@@ -155,7 +195,7 @@ func writeImage(imgChan <-chan imagePoint, wg *sync.WaitGroup) {
 }
 
 func writeCSV(csvChan <-chan csvPoint, wg *sync.WaitGroup) {
-	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v.csv", exponent, bailRadius, iterations, width, height)
+	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v-ES.csv", exponent, bailRadius, iterations, width, height)
 	f, err := os.Create(filename)
 	if err != nil {
 		fmt.Println("error creating CSV file")
@@ -175,7 +215,7 @@ func writeCSV(csvChan <-chan csvPoint, wg *sync.WaitGroup) {
 				//if you have i,j in the buffer, append it to the slice
 				for k, v := range buffer {
 					if v.loc.x == i && v.loc.y == j {
-						csvStrings = append(csvStrings, strconv.FormatInt(int64(v.score), 10))
+						csvStrings = append(csvStrings, strconv.FormatFloat(v.score, 'f', -1, 64))
 						found = true
 						buffer = append(buffer[:k], buffer[k+1:]...)
 						break
@@ -217,8 +257,8 @@ func complexPower(a, b, exp float64) (float64, float64) {
 	return aRet, bRet
 }
 
-func getHeatColor(mbValue, iterations int) color.RGBA {
-	intensity := float64(mbValue) / float64(iterations)
+func getHeatColor(mbValue float64, iterations int) color.RGBA {
+	intensity := mbValue / float64(iterations)
 
 	intensity = 1.0 - math.Pow(intensity, .25)
 
