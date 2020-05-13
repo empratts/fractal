@@ -95,7 +95,7 @@ func mb(p point) float64 {
 
 	xa := 0.0
 	xb := 0.0
-	var xaPrev, xbPrev, x1, x2, y1, y2 float64
+	var xaPrev, xbPrev float64
 
 	for i := 0; i < iterations; i++ {
 		//repeated application of MB
@@ -107,44 +107,7 @@ func mb(p point) float64 {
 		bailDistance := math.Sqrt(xa*xa + xb*xb)
 		if bailDistance > bailRadius {
 
-			if xa == math.Min(xa, xaPrev) {
-				x1, y1 = xa, xb
-				x2, y2 = xaPrev, xbPrev
-			} else {
-				x2, y2 = xa, xb
-				x1, y1 = xaPrev, xbPrev
-			}
-
-			//fmt.Println(xaPrev, xbPrev)
-			//fmt.Println(xa, xb)
-
-			m := (y2 - y1) / (x2 - x1)
-			b := y1 - (m * x1)
-			//fmt.Println(m)
-			//fmt.Println(b)
-
-			aQuad := m*m + 1
-			bQuad := 2 * m * b
-			cQuad := b*b - bailRadius*bailRadius
-
-			xQuad := (-1.0*bQuad + math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
-
-			if xQuad > x2 || xQuad < x1 {
-				xQuad = (-1.0*bQuad - math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
-			}
-
-			yQuad := m*xQuad + b
-			// fmt.Println(xQuad, yQuad)
-
-			interceptDistance := math.Sqrt((xaPrev-xQuad)*(xaPrev-xQuad) + (xbPrev-yQuad)*(xbPrev-yQuad))
-			exitDistance := math.Sqrt((xaPrev-xa)*(xaPrev-xa) + (xbPrev-xb)*(xbPrev-xb))
-			// fmt.Println(interceptDistance)
-			// fmt.Println(exitDistance)
-
-			exitSpeed := interceptDistance / exitDistance
-			// fmt.Println(exitSpeed)
-
-			return float64(i) + exitSpeed
+			return float64(i) + exitSpeed(xa, xb, xaPrev, xbPrev)
 		}
 	}
 	return float64(iterations)
@@ -255,6 +218,43 @@ func complexPower(a, b, exp float64) (float64, float64) {
 	bRet *= r
 
 	return aRet, bRet
+}
+
+//exitSpeed takes the points before and after exiting the bailout circle. It returns the fraction of the line segment between the
+//two points that is inside of the bailout circle. This value is a reflection of how close the point was to exiting one iteration sooner or later
+func exitSpeed(x, y, xPrev, yPrev float64) float64 {
+
+	var x1, x2, y1, y2 float64
+
+	if x == math.Min(x, xPrev) {
+		x1, y1 = x, y
+		x2, y2 = xPrev, yPrev
+	} else {
+		x2, y2 = x, y
+		x1, y1 = xPrev, yPrev
+	}
+
+	m := (y2 - y1) / (x2 - x1)
+	b := y1 - (m * x1)
+
+	aQuad := m*m + 1
+	bQuad := 2 * m * b
+	cQuad := b*b - bailRadius*bailRadius
+
+	xQuad := (-1.0*bQuad + math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
+
+	if xQuad > x2 || xQuad < x1 {
+		xQuad = (-1.0*bQuad - math.Sqrt(bQuad*bQuad-4*aQuad*cQuad)) / (2.0 * aQuad)
+	}
+
+	yQuad := m*xQuad + b
+
+	interceptDistance := math.Sqrt((xPrev-xQuad)*(xPrev-xQuad) + (yPrev-yQuad)*(yPrev-yQuad))
+	exitDistance := math.Sqrt((xPrev-x)*(xPrev-x) + (yPrev-y)*(yPrev-y))
+
+	exitSpeed := interceptDistance / exitDistance
+
+	return exitSpeed
 }
 
 func getHeatColor(mbValue float64, iterations int) color.RGBA {
