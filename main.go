@@ -15,7 +15,7 @@ import (
 
 var width, height int = 512, 512      //width and height of the image in pixels
 var xRange, yRange float64 = 2.0, 2.0 //the range +/- plotted on the cartesian plane
-var exponent float64 = 9.71           //exponent of the mandelbrot function
+var exponent float64 = 2.07           //exponent of the mandelbrot function
 var iterations int = 10000            //the number of iterations to compute before bailing out
 var bailRadius float64 = 200.0        //point to assume the function will diverge
 var mbRoutines int = 8                //number of concurrent goroutines to use

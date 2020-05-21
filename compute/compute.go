@@ -19,14 +19,15 @@ type Computer struct {
 
 //Point represents a single pixil in a fractal
 type Point struct {
-	X         int
-	Y         int
-	Score     int
-	ExitSpeed float64
+	X          int
+	Y          int
+	Score      int
+	ExitSpeed  float64
+	Iterations int
 }
 
 //Calculate sends all fractal results to the channel passed. No gaurentee is made that the will be in order
-func (c Computer) Calculate(points chan<- Point, wg *sync.WaitGroup) {
+func (c *Computer) Calculate(points chan<- Point, wg *sync.WaitGroup) {
 
 	if c.CombinedScores == nil || len(c.CombinedScores) != c.Width || len(c.CombinedScores[0]) != c.Height {
 		c.CombinedScores = make([][]float64, c.Width)
@@ -37,7 +38,7 @@ func (c Computer) Calculate(points chan<- Point, wg *sync.WaitGroup) {
 
 	c.ScoreMap = make(map[int]int)
 
-	var calcWG sync.WaitGroup
+	var calcWG, recordWG sync.WaitGroup
 
 	input := make(chan Point)
 	record := make(chan Point)
@@ -47,22 +48,27 @@ func (c Computer) Calculate(points chan<- Point, wg *sync.WaitGroup) {
 		go c.mbConc(input, points, record, &calcWG)
 	}
 
-	calcWG.Add(1)
-	go c.recordPoints(record, &calcWG)
+	recordWG.Add(1)
+	go c.recordPoints(record, &recordWG)
 
 	for xIter := 0; xIter < c.Width; xIter++ {
 		for yIter := 0; yIter < c.Height; yIter++ {
-			input <- Point{X: xIter, Y: yIter}
+			input <- Point{X: xIter, Y: yIter, Iterations: c.Iterations}
 		}
 	}
 
 	close(input)
+
 	calcWG.Wait()
+
+	close(record)
 	close(points)
+
+	recordWG.Wait()
 	wg.Done()
 }
 
-func (c Computer) mbConc(input <-chan Point, solved chan<- Point, record chan<- Point, wg *sync.WaitGroup) {
+func (c *Computer) mbConc(input <-chan Point, solved chan<- Point, record chan<- Point, wg *sync.WaitGroup) {
 
 	for {
 		p, more := <-input
@@ -78,7 +84,7 @@ func (c Computer) mbConc(input <-chan Point, solved chan<- Point, record chan<- 
 }
 
 //this function records completed points in both CombinedScores and ScoreMap
-func (c Computer) recordPoints(record <-chan Point, wg *sync.WaitGroup) {
+func (c *Computer) recordPoints(record <-chan Point, wg *sync.WaitGroup) {
 	for {
 		p, chanOk := <-record
 		if chanOk {
@@ -97,7 +103,7 @@ func (c Computer) recordPoints(record <-chan Point, wg *sync.WaitGroup) {
 
 }
 
-func (c Computer) mb(p Point) (int, float64) {
+func (c *Computer) mb(p Point) (int, float64) {
 	//the function takes the form (X^exp + (a + bi))
 
 	//first calculate the starting point for the pixel in the plane between +/- xbound, ybound
@@ -178,4 +184,28 @@ func exitSpeed(x, y, xPrev, yPrev, bailRadius float64) float64 {
 	exitSpeed := interceptDistance / exitDistance
 
 	return exitSpeed
+}
+
+func (c *Computer) RequestScorePoints(score int, points chan<- Point) {
+	_, ok := c.ScoreMap[score]
+
+	if ok {
+		for k, v := range c.CombinedScores {
+			for l, w := range v {
+				s := int(w)
+
+				if s == score {
+					p := Point{X: k,
+						Y:          l,
+						Score:      score,
+						ExitSpeed:  w - float64(score),
+						Iterations: c.Iterations,
+					}
+					points <- p
+				}
+			}
+		}
+	}
+
+	close(points)
 }
