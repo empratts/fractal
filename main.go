@@ -30,7 +30,7 @@ var colors [][]uint8 = [][]uint8{
 
 var width, height int = 2048, 2048    //width and height of the image in pixels
 var xRange, yRange float64 = 2.0, 2.0 //the range +/- plotted on the cartesian plane
-var exponent float64 = 3.40           //exponent of the mandelbrot function
+var exponent float64 = 2.0           //exponent of the mandelbrot function
 var iterations int = 10000            //the number of iterations to compute before bailing out
 var bailRadius float64 = 200.0        //point to assume the function will diverge
 var mbRoutines int = 8                //number of concurrent goroutines to use
@@ -59,27 +59,41 @@ func main() {
 		}
 	}
 
-	b := bar.New(width)
-	var wg sync.WaitGroup
-	pChan := make(chan point)
+	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v.csv", exponent, bailRadius, iterations, width, height)
+
 	imgChan := make(chan imagePoint)
-	csvChan := make(chan csvPoint)
-
-	for i := 0; i < mbRoutines; i++ {
-		go mbConc(pChan, imgChan, csvChan)
-	}
-
+	var wg sync.WaitGroup
+	b := bar.New(width)
+	
 	wg.Add(1)
 	go writeImage(imgChan, &wg)
-	wg.Add(1)
-	go writeCSV(csvChan, &wg)
 
-	// Set color for each pixel.
-	for xIter := 0; xIter < width; xIter++ {
-		for yIter := 0; yIter < height; yIter++ {
-			pChan <- point{x: xIter, y: yIter}
+	file, err := os.Open(filename)
+	
+	if err == nil {
+		// file exists, read from it instead of recomputing
+		wg.Add(1)
+		go readCSV(imgChan, file, &wg, b)
+
+	} else {
+		//CSV does not exist, compute all new values.
+		pChan := make(chan point)
+		csvChan := make(chan csvPoint)
+	
+		for i := 0; i < mbRoutines; i++ {
+			go mbConc(pChan, imgChan, csvChan)
 		}
-		b.Tick()
+	
+		wg.Add(1)
+		go writeCSV(csvChan, &wg)
+	
+		// Set color for each pixel.
+		for xIter := 0; xIter < width; xIter++ {
+			for yIter := 0; yIter < height; yIter++ {
+				pChan <- point{x: xIter, y: yIter}
+			}
+			b.Tick()
+		}
 	}
 
 	wg.Wait()
@@ -113,7 +127,7 @@ func mb(p point) int {
 func mbConc(pChan <-chan point, imgChan chan<- imagePoint, csvChan chan<- csvPoint) {
 	var p point
 
-	for true {
+	for {
 		p = <-pChan
 		output := mb(p)
 		newColor := getHeatColor(output, iterations)
@@ -126,17 +140,19 @@ func mbConc(pChan <-chan point, imgChan chan<- imagePoint, csvChan chan<- csvPoi
 
 func writeImage(imgChan <-chan imagePoint, wg *sync.WaitGroup) {
 
+	defer wg.Done()
+
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{width, height}
 
 	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
 
-	pixilCount := width * height
+	pixelCount := width * height
 
 	var ip imagePoint
 
 	// Set color for each pixel.
-	for i := 0; i < pixilCount; i++ {
+	for i := 0; i < pixelCount; i++ {
 		ip = <-imgChan
 		img.Set(ip.loc.x, ip.loc.y, ip.pointColor)
 	}
@@ -145,16 +161,17 @@ func writeImage(imgChan <-chan imagePoint, wg *sync.WaitGroup) {
 	f, err := os.Create(filename)
 	if err != nil {
 		fmt.Println("error creating PNG file")
+		return
 	}
 	defer f.Close()
 	err = png.Encode(f, img)
 	if err != nil {
 		fmt.Println("error writing to PNG file")
 	}
-	wg.Done()
 }
 
 func writeCSV(csvChan <-chan csvPoint, wg *sync.WaitGroup) {
+	defer wg.Done()
 	filename := fmt.Sprintf("exp %v bail %v iter %v - %vx%v.csv", exponent, bailRadius, iterations, width, height)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -165,42 +182,60 @@ func writeCSV(csvChan <-chan csvPoint, wg *sync.WaitGroup) {
 	writer := csv.NewWriter(f)
 	defer writer.Flush()
 
-	buffer := []csvPoint{}
+	csvStrings := make([][]string, height)
 
-	for i := 0; i < width; i++ {
-		csvStrings := []string{}
-		for j := 0; j < height; j++ {
-			found := false
-			for !found {
-				//if you have i,j in the buffer, append it to the slice
-				for k, v := range buffer {
-					if v.loc.x == i && v.loc.y == j {
-						csvStrings = append(csvStrings, strconv.FormatInt(int64(v.score), 10))
-						found = true
-						buffer = append(buffer[:k], buffer[k+1:]...)
-						break
-					}
-				}
-				//if not, wait for something on the channel and place it in the buffer
-				if !found {
-					pointIn := <-csvChan
-					buffer = append(buffer, pointIn)
-					for pointIn.loc.x != i || pointIn.loc.y != j {
-						pointIn = <-csvChan
-						buffer = append(buffer, pointIn)
-					}
-				}
-			}
-		}
-		//write csvStrings to the file
-		err = writer.Write(csvStrings)
+	for i :=0; i < height; i++ {
+		csvStrings[i] = make([]string, width)
+	}
+
+	for i := 0; i < height * width; i++ {
+		pointIn := <-csvChan
+		csvStrings[pointIn.loc.y][pointIn.loc.x] = strconv.FormatInt(int64(pointIn.score), 10)
+	}
+
+	//write csvStrings to the file
+	for i :=0; i < height; i++ {
+		err = writer.Write(csvStrings[i])
 		writer.Flush()
 		if err != nil {
 			fmt.Println("error writing to CSV file")
 		}
 	}
 
-	wg.Done()
+
+}
+
+func readCSV(imgChan chan<- imagePoint, file *os.File, wg *sync.WaitGroup, b *bar.Bar){
+	fmt.Println("Reading from CSV")
+	defer file.Close()
+	defer wg.Done()
+
+	reader := csv.NewReader(file)
+
+	for i := 0; i < height; i++ {
+		csvStrings, err := reader.Read()
+
+		if err != nil {
+			fmt.Println("Error reading line from CSV. Bailing out")
+			wg.Done()
+			return
+		}
+
+		for j := 0; j < width; j++ {
+			output, err := strconv.Atoi(csvStrings[j])
+
+			if err != nil {
+				fmt.Println("Error reading value from CSV. Bailing out")
+				wg.Done()
+				return
+			}
+			p := point{x: j, y: i}
+			newColor := getHeatColor(output, iterations)
+			ip := imagePoint{loc: p, pointColor: newColor}
+			imgChan <- ip
+		}
+		b.Tick()
+	}
 }
 
 func complexPower(a, b, exp float64) (float64, float64) {
